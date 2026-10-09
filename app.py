@@ -32,7 +32,7 @@ def get_per_year_change(col, df, metric):
     return grp_years
 
 # تحميل البيانات وتخزينها مؤقتاً
-@st.cache_data(ttl=3600)
+@st.cache_data(ttl=50)
 def load_data():
     try:
         df = pd.read_excel(
