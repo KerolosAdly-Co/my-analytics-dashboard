@@ -7,33 +7,45 @@ import plotly.graph_objects as go
 # 1. إعدادات الصفحة
 st.set_page_config(page_title="لوحة تحكم مبيعات محل ملابس", layout="wide", page_icon="🛍️")
 
-# 2. دالة قراءة البيانات
+# ==========================================
+# 2. دالة قراءة البيانات (تم تعديلها لتناسب ملفك)
+# ==========================================
 @st.cache_data
 def load_data():
     try:
-        df = pd.read_excel("Sales Shop.xlsx")
+        # استخدام header=1 لتخطي الصف الأول (العنوان المدمج) واعتبار الصف الثاني هو الترويسة
+        df = pd.read_excel("Sales Shop.xlsx", header=1)
+        
+        # تنظيف أسماء الأعمدة من المسافات
         df.columns = df.columns.str.strip()
         
-        # تنسيق البيانات
-        df['التاريخ'] = pd.to_datetime(df['التاريخ'])
+        # تحويل التاريخ وحذف صف "الإجمالي" والصفوف الفارغة تلقائياً
+        df['التاريخ'] = pd.to_datetime(df['التاريخ'], errors='coerce')
+        df = df.dropna(subset=['التاريخ']) 
+        
+        # التأكد من أن الأعمدة الرقمية أرقام (ولو مش موجودة نضعها 0)
         cols_to_numeric = ['المبيعات', 'الأرباح', 'الطلبات']
         for col in cols_to_numeric:
             if col in df.columns:
-                df[col] = pd.to_numeric(df[col], errors='coerce')
+                df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0)
+            else:
+                df[col] = 0
+                st.warning(f"⚠️ تنبيه: العمود '{col}' غير موجود في الملف، تم تعيينه كـ 0.")
         
-        # أعمدة مساعدة للتحليل الزمني
+        # التأكد من الأعمدة النصية
+        for col in ['الفرع', 'المنطقة', 'المنتج', 'الفئة']:
+            if col not in df.columns:
+                df[col] = 'غير محدد'
+        
+        # أعمدة مساعدة للتحليل
         df['الشهر'] = df['التاريخ'].dt.strftime('%Y-%m')
         df['السنة'] = df['التاريخ'].dt.year
         df['نسبة الربح'] = np.where(df['المبيعات'] > 0, (df['الأرباح'] / df['المبيعات']) * 100, 0)
         
-        # التأكد من وجود عمود الفرع
-        if 'الفرع' not in df.columns:
-            st.warning("⚠️ تنبيه: عمود 'الفرع' غير موجود في ملف الإكسيل. يرجى إضافته لتفعيل تحليلات الفروع.")
-            df['الفرع'] = 'غير محدد'
-            
         return df
+        
     except FileNotFoundError:
-        st.error("⚠️ خطأ: لم يتم العثور على ملف 'Sales Shop.xlsx'.")
+        st.error("⚠️ خطأ: لم يتم العثور على ملف 'Sales Shop.xlsx'. يرجى التأكد من وجود الملف في نفس المجلد.")
         st.stop()
     except Exception as e:
         st.error(f"⚠️ حدث خطأ أثناء قراءة الملف: {e}")
@@ -41,7 +53,9 @@ def load_data():
 
 df = load_data()
 
+# ==========================================
 # 3. الشريط الجانبي (الفلاتر)
+# ==========================================
 st.sidebar.header("🔍 خيارات التصفية")
 min_date = df['التاريخ'].min().date()
 max_date = df['التاريخ'].max().date()
@@ -59,14 +73,15 @@ if selected_branch: mask = mask & (df['الفرع'].isin(selected_branch))
 if selected_category: mask = mask & (df['الفئة'].isin(selected_category))
 filtered_df = df[mask]
 
-# 4. عنوان اللوحة
+# ==========================================
+# 4. عنوان اللوحة والمؤشرات الرئيسية (KPIs)
+# ==========================================
 st.title("🛍️ لوحة تحكم مبيعات محل الملابس")
 
 if filtered_df.empty:
     st.warning("لا توجد بيانات متاحة للفلاتر المحددة.")
     st.stop()
 
-# 5. المؤشرات الرئيسية (KPIs)
 total_sales = filtered_df['المبيعات'].sum()
 total_profit = filtered_df['الأرباح'].sum()
 total_orders = filtered_df['الطلبات'].sum()
@@ -80,7 +95,9 @@ col4.metric("متوسط قيمة الطلب (AOV)", f"${aov:,.2f}")
 
 st.markdown("---")
 
-# 6. تقسيم اللوحة إلى تبويبات (Tabs)
+# ==========================================
+# 5. تقسيم اللوحة إلى تبويبات (Tabs)
+# ==========================================
 tab1, tab2, tab3 = st.tabs(["📊 نظرة عامة والأرباح السنوية", "🏢 تحليل الفروع والأرباح الشهرية", "📦 تحليل المنتجات"])
 
 # ==========================================
@@ -90,7 +107,8 @@ with tab1:
     st.subheader("📈 تطور المبيعات والأرباح")
     trend_data = filtered_df.groupby('التاريخ')[['المبيعات', 'الأرباح']].sum().reset_index()
     fig_trend = px.line(trend_data, x='التاريخ', y=['المبيعات', 'الأرباح'], 
-                        color_discrete_map={'المبيعات': '#2ecc71', 'الأرباح': '#3498db'})
+                        color_discrete_map={'المبيعات': '#2ecc71', 'الأرباح': '#3498db'},
+                        labels={'value': 'المبلغ ($)', 'variable': 'المؤشر'})
     st.plotly_chart(fig_trend, use_container_width=True)
 
     col_t1, col_t2 = st.columns(2)
@@ -107,7 +125,6 @@ with tab1:
     
     yearly_profit = filtered_df.groupby('السنة')['الأرباح'].sum().reset_index()
     if not yearly_profit.empty:
-        # إيجاد أكثر سنة ربحاً
         best_year_idx = yearly_profit['الأرباح'].idxmax()
         best_year = yearly_profit.loc[best_year_idx]
         
@@ -143,13 +160,11 @@ with tab2:
     monthly_branch_profit = filtered_df.pivot_table(index='الشهر', columns='الفرع', values='الأرباح', aggfunc='sum').fillna(0)
     
     if not monthly_branch_profit.empty:
-        # رسم بياني خطي لتطور أرباح الفروع شهرياً
         fig_monthly_profit = px.line(monthly_branch_profit, x=monthly_branch_profit.index, y=monthly_branch_profit.columns,
                                      title="تطور الأرباح الشهرية لكل فرع",
                                      labels={'value': 'الأرباح ($)', 'variable': 'الفرع', 'الشهر': 'الشهر'})
         st.plotly_chart(fig_monthly_profit, use_container_width=True)
         
-        # عرض الجدول التفصيلي
         with st.expander("📄 عرض جدول الأرباح الشهرية لكل فرع"):
             st.dataframe(monthly_branch_profit.style.format("{:,.2f}"), use_container_width=True)
 
@@ -212,6 +227,8 @@ with tab3:
         fig_margin.update_layout(yaxis={'categoryorder':'total ascending'}, showlegend=False)
         st.plotly_chart(fig_margin, use_container_width=True)
 
+# ==========================================
 # 10. جدول البيانات التفصيلي
+# ==========================================
 with st.expander("📄 عرض البيانات التفصيلية (Sales Shop.xlsx)"):
     st.dataframe(filtered_df.sort_values(by='التاريخ', ascending=False), use_container_width=True)
