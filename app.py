@@ -4,6 +4,7 @@ import pandas as pd
 from millify import millify
 from streamlit_extras.metric_cards import style_metric_cards
 import plotly.graph_objects as go
+import plotly.express as px  # تمت الإضافة لعرض الخريطة
 import altair as alt
 
 # إعداد الصفحة
@@ -69,6 +70,7 @@ dash_3 = st.container()
 dash_4 = st.container()
 dash_5 = st.container()
 dash_6 = st.container()
+dash_7 = st.container() # تمت إضافة قسم جديد للخريطة
 
 # تحميل البيانات
 df_original, grp_years_sales, grp_year_profit, grp_year_orders = load_data()
@@ -229,3 +231,35 @@ with dash_6:
         )
         chart = (bars + text).properties(title="Sales trends for Product Categories over the years")
         st.altair_chart(chart, use_container_width=True, theme="streamlit")
+
+# القسم 7: الخريطة التفاعلية (Map 🗺️ Sales By Region)
+with dash_7:
+    st.markdown("### 🗺️ Sales By Region (Map)")
+    
+    # التحقق من وجود عمود 'State' لرسم الخريطة
+    if 'State' in df.columns:
+        # تجميع المبيعات حسب الولاية
+        state_sales_map = df.groupby('State')['Sales'].sum().reset_index()
+        
+        # إنشاء الخريطة التفاعلية
+        fig_map = px.choropleth(
+            state_sales_map,
+            locations='State',
+            locationmode="USA-states", # لأن بيانات Superstore خاصة بالولايات المتحدة
+            color='Sales',
+            scope="usa",
+            color_continuous_scale="Viridis", # يمكنك تغيير التدرج اللوني (مثل "Blues", "Reds", "Plasma")
+            title="Sales Distribution Across US States",
+            labels={'Sales': 'Total Sales ($)'}
+        )
+        
+        # تحديث تنسيق الخريطة لتناسب الوضع الداكن
+        fig_map.update_layout(
+            height=500,
+            margin={"r":0,"t":50,"l":0,"b":0},
+            coloraxis_colorbar=dict(title="Sales ($)")
+        )
+        
+        st.plotly_chart(fig_map, use_container_width=True, theme="streamlit")
+    else:
+        st.warning("⚠️ عمود 'State' غير موجود في ملف الإكسل، لا يمكن رسم الخريطة.")
