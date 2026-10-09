@@ -1,166 +1,140 @@
 import streamlit as st
 import pandas as pd
 import plotly.express as px
-import plotly.graph_objects as go
 
-# إعدادات الصفحة بنمط مظلم متوافق مع التصميم
-st.set_page_config(
-    page_title="Executive Analytics Dashboard",
-    page_icon="📊",
-    layout="wide"
-)
+# 1. إعدادات الصفحة الأساسية
+st.set_page_config(page_title="Ultimate Interactive Dashboard", page_icon="🌐", layout="wide")
 
-# تخصيص التصميم الداكن والخلفيات عبر CSS لتشبه لوحات التحكم الاحترافية
+# 2. تصميم CSS احترافي
 st.markdown("""
     <style>
-        .stApp {
-            background-color: #0b132b;
-            color: #ffffff;
-        }
+        .stApp { background-color: #0e1117; }
+        .main-header { font-size: 40px; font-weight: bold; color: #00f2fe; text-align: center; margin-bottom: 10px; }
+        .sub-header { font-size: 20px; color: #a8b2c1; text-align: center; margin-bottom: 30px; }
         div[data-testid="metric-container"] {
-            background-color: #1c2541;
-            border: 1px solid #3a506b;
-            padding: 15px;
-            border-radius: 12px;
-            box-shadow: 0 4px 6px rgba(0,0,0,0.3);
-        }
-        .upload-section {
-            background-color: #1c2541;
-            padding: 20px;
-            border-radius: 10px;
-            border: 2px dashed #48cae4;
-            text-align: center;
+            background-color: #1e2633; border-left: 5px solid #00f2fe; 
+            padding: 15px; border-radius: 10px; box-shadow: 0px 4px 10px rgba(0,0,0,0.5);
         }
     </style>
 """, unsafe_allow_html=True)
 
-# العنوان العلوي وشريط التحكم
-st.markdown("<h1 style='text-align: center; color: #6fffe9;'>🚀 لوحة تحكم الأعمال والتحليلات التنفيذية</h1>", unsafe_allow_html=True)
-st.markdown("<p style='text-align: center; color: #adb5bd;'>ارفع ملف الاكسل الخاص بك لرؤية المبيعات والأداء المالي والإحصائيات الفورية</p>", unsafe_allow_html=True)
+# العنوان
+st.markdown('<div class="main-header">🌐 منصة التحليلات الذكية التفاعلية</div>', unsafe_allow_html=True)
+st.markdown('<div class="sub-header">ارفع ملف بياناتك لاكتشاف الرؤى، الاتجاهات، والعلاقات بضغطة زر</div>', unsafe_allow_html=True)
 
-st.sidebar.header("📁 إدارة البيانات")
-uploaded_file = st.sidebar.file_uploader("اختر ملف الاكسل أو الـ CSV", type=["xlsx", "xls", "csv"])
+# 3. القائمة الجانبية - رفع الملف
+st.sidebar.header("📂 إدارة البيانات")
+uploaded_file = st.sidebar.file_uploader("ارفع ملف البيانات (Excel / CSV)", type=["xlsx", "xls", "csv"])
 
 if uploaded_file is not None:
     try:
-        # قراءة الملف بمرونة عالية
+        # قراءة البيانات
         if uploaded_file.name.endswith('.csv'):
             df = pd.read_csv(uploaded_file)
         else:
             df = pd.read_excel(uploaded_file, engine='openpyxl')
         
-        # تنظيف مسافات أسماء الأعمدة
-        df.columns = df.columns.str.strip()
-        st.sidebar.success("تم رفع وتحليل البيانات بنجاح! 🔥")
+        df.columns = df.columns.str.strip() # تنظيف أسماء الأعمدة
 
-        # تصنيف الأعمدة تلقائياً
-        numeric_cols = df.select_dtypes(include=['number']).columns.tolist()
-        text_cols = df.select_dtypes(include=['object', 'category']).columns.tolist()
+        # استخراج أنواع الأعمدة
+        num_cols = df.select_dtypes(include=['number']).columns.tolist()
+        cat_cols = df.select_dtypes(include=['object', 'category']).columns.tolist()
 
-        # -------------------------------------------------------------
-        # 1. كروت مؤشرات الأداء العليا (Top KPI Cards متوافقة مع الصورة)
-        # -------------------------------------------------------------
-        st.markdown("### 📈 المؤشرات الرئيسية (Executive Summary)")
+        # 4. فلترة تفاعلية في القائمة الجانبية
+        st.sidebar.markdown("---")
+        st.sidebar.header("🔍 فلاتر البيانات")
+        df_filtered = df.copy()
+        if cat_cols:
+            selected_filter_col = st.sidebar.selectbox("اختر عمود للفلترة:", ["بدون فلتر"] + cat_cols)
+            if selected_filter_col != "بدون فلتر":
+                unique_vals = df[selected_filter_col].dropna().unique().tolist()
+                selected_vals = st.sidebar.multiselect(f"اختر قيم {selected_filter_col}:", unique_vals, default=unique_vals)
+                df_filtered = df[df[selected_filter_col].isin(selected_vals)]
+
+        st.sidebar.success(f"تم تحليل البيانات! (الصفوف المتبقية: {len(df_filtered)})")
+
+        # 5. كروت المؤشرات التفاعلية (KPIs)
+        st.markdown("### 📊 مؤشرات الأداء الحيوية (KPIs)")
         kpi1, kpi2, kpi3, kpi4 = st.columns(4)
-
-        total_rows = df.shape[0]
         
-        # افتراض الحقول الذكية أو اختيارها تلقائياً
-        rev_col = numeric_cols[0] if numeric_cols else None
-        profit_col = numeric_cols[1] if len(numeric_cols) > 1 else rev_col
-        sales_col = numeric_cols[2] if len(numeric_cols) > 2 else rev_col
-
-        total_revenue = df[rev_col].sum() if rev_col else 0
-        # افتراض هامش ربح تقديري إذا لم يوجد عمود ربح صريح
-        total_profit = df[profit_col].sum() * 0.3 if profit_col else 0   
-        total_sales_val = df[sales_col].sum() if sales_col else total_rows
-
-        kpi1.metric("إجمالي الإيرادات (Total Revenue)", f"${total_revenue:,.0f}", delta="7.37% 🟢")
-        kpi2.metric("إجمالي الأرباح (Total Profit)", f"${total_profit:,.0f}", delta="2.37% 🟢")
-        kpi3.metric("إجمالي المبيعات (Total Sales)", f"${total_sales_val:,.0f}", delta="1.74% 🟢")
-        kpi4.metric("كفاءة المتجر (Store Status)", "ممتازة (88%)", delta="حالة مستقرة")
+        kpi1.metric("إجمالي السجلات (الصفوف)", f"{len(df_filtered):,}")
+        kpi2.metric("إجمالي الأعمدة", f"{df_filtered.shape[1]}")
+        
+        if num_cols:
+            kpi_target = st.selectbox("اختر العمود الرقمي لحساب الإجماليات المتغيرة:", num_cols)
+            total_val = df_filtered[kpi_target].sum()
+            avg_val = df_filtered[kpi_target].mean()
+            kpi3.metric(f"إجمالي ({kpi_target})", f"{total_val:,.2f}")
+            kpi4.metric(f"متوسط ({kpi_target})", f"{avg_val:,.2f}")
+        else:
+            kpi3.metric("لا توجد أعمدة رقمية", "0")
+            kpi4.metric("لا توجد أعمدة رقمية", "0")
 
         st.markdown("---")
 
-        # -------------------------------------------------------------
-        # 2. الصف الأول من الرسوم البيانية (مقارنات وتحليلات الأداء)
-        # -------------------------------------------------------------
-        row1_col1, row1_col2 = st.columns([1, 1.5])
+        # 6. نظام التبويبات للتحليل الشامل (Tabs)
+        tab1, tab2, tab3, tab4 = st.tabs(["📊 التحليل العام", "🔗 تحليل العلاقات", "📦 التوزيع الإحصائي", "📋 تفاصيل البيانات"])
 
-        with row1_col1:
-            st.subheader("⚙️ الإنتاجية والتوزيع حسب الوحدة")
-            if text_cols and numeric_cols:
-                unit_cat = st.selectbox("اختر فئة التصنيف:", text_cols, key='unit_cat')
-                unit_val = st.selectbox("اختر القياس:", numeric_cols, key='unit_val')
+        # التبويب الأول: التحليل العام (أعمدة ودائرة)
+        with tab1:
+            st.markdown("#### 📈 مقارنة الفئات وتوزيع النسب")
+            col1, col2 = st.columns(2)
+            with col1:
+                if cat_cols and num_cols:
+                    bar_x = st.selectbox("المحور الأفقي (الفئات):", cat_cols, key='bar_x')
+                    bar_y = st.selectbox("المحور الرأسي (القيم):", num_cols, key='bar_y')
+                    # تجميع لأعلى 15 نتيجة
+                    bar_data = df_filtered.groupby(bar_x)[bar_y].sum().reset_index().sort_values(by=bar_y, ascending=False).head(15)
+                    fig_bar = px.bar(bar_data, x=bar_x, y=bar_y, color=bar_y, template="plotly_dark", title=f"إجمالي {bar_y} حسب {bar_x}", color_continuousscale="Blues")
+                    st.plotly_chart(fig_bar, use_container_width=True)
+                else:
+                    st.info("نحتاج لأعمدة رقمية ونصية معاً لرسم هذا المخطط.")
+            
+            with col2:
+                if cat_cols and num_cols:
+                    pie_name = st.selectbox("تصنيف الدائرة:", cat_cols, key='pie_name')
+                    pie_val = st.selectbox("قيم الدائرة:", num_cols, key='pie_val')
+                    pie_data = df_filtered.groupby(pie_name)[pie_val].sum().reset_index().head(10)
+                    fig_pie = px.pie(pie_data, names=pie_name, values=pie_val, hole=0.4, template="plotly_dark", title=f"توزيع {pie_val} على {pie_name}")
+                    st.plotly_chart(fig_pie, use_container_width=True)
+
+        # التبويب الثاني: تحليل العلاقات (Scatter Plot)
+        with tab2:
+            st.markdown("#### 📍 اكتشاف العلاقات بين المؤشرات الرقمية")
+            if len(num_cols) >= 2:
+                sc_col1, sc_col2 = st.columns(2)
+                sc_x = sc_col1.selectbox("المحور الأفقي (X):", num_cols, index=0)
+                sc_y = sc_col2.selectbox("المحور الرأسي (Y):", num_cols, index=1)
                 
-                chart_data = df.groupby(unit_cat)[unit_val].sum().reset_index().head(8)
-                fig_barh = px.bar(
-                    chart_data, x=unit_val, y=unit_cat, orientation='h',
-                    template="plotly_dark", color=unit_val, color_continuousscale="Tealgrn"
-                )
-                fig_barh.update_layout(plot_bgcolor='rgba(0,0,0,0)', paper_bgcolor='rgba(0,0,0,0)')
-                st.plotly_chart(fig_barh, use_container_width=True)
+                fig_scatter = px.scatter(df_filtered, x=sc_x, y=sc_y, color=cat_cols[0] if cat_cols else None, 
+                                         template="plotly_dark", title=f"علاقة {sc_y} بـ {sc_x}", opacity=0.7)
+                st.plotly_chart(fig_scatter, use_container_width=True)
             else:
-                st.info("يتطلب وجود بيانات نصية ورقمية.")
+                st.info("نحتاج لعمودين رقميين على الأقل لرسم مخطط العلاقات (Scatter Plot).")
 
-        with row1_col2:
-            st.subheader("📊 نظرة عامة على المبيعات والأرباح (Sales Overview)")
-            if numeric_cols and text_cols:
-                time_col = text_cols[0]
-                multi_fig = px.bar(
-                    df.head(12), x=time_col, y=numeric_cols[:2],
-                    barmode='group', template="plotly_dark"
-                )
-                multi_fig.update_layout(plot_bgcolor='rgba(0,0,0,0)', paper_bgcolor='rgba(0,0,0,0)')
-                st.plotly_chart(multi_fig, use_container_width=True)
+        # التبويب الثالث: التوزيع الإحصائي
+        with tab3:
+            st.markdown("#### 📦 تحليل التوزيع واكتشاف القيم الشاذة")
+            if num_cols:
+                dist_col = st.selectbox("اختر العمود الرقمي لتحليله:", num_cols, key='dist_col')
+                fig_hist = px.histogram(df_filtered, x=dist_col, marginal="box", template="plotly_dark", 
+                                        title=f"التوزيع الإحصائي والصندوقي لـ {dist_col}", color_discrete_sequence=['#00f2fe'])
+                st.plotly_chart(fig_hist, use_container_width=True)
             else:
-                st.warning("البيانات الحالية لا توفر أعمدة كافية للمقارنة الزمنية.")
+                st.info("لا توجد أعمدة رقمية للتحليل.")
 
-        st.markdown("---")
-
-        # -------------------------------------------------------------
-        # 3. الصف الثاني (المنتجات الأكثر مبيعاً وتوزيع النسب الدائري)
-        # -------------------------------------------------------------
-        row2_col1, row2_col2 = st.columns([1, 1])
-
-        with row2_col1:
-            st.subheader("🏆 أفضل المنتجات مبيعاً (Top Products)")
-            if text_cols and numeric_cols:
-                prod_cat = st.selectbox("عمود المنتجات:", text_cols, key='prod_cat')
-                prod_val = st.selectbox("قيمة المبيعات للمنتج:", numeric_cols, key='prod_val')
-                
-                top_prods = df.groupby(prod_cat)[prod_val].sum().reset_index().sort_values(by=prod_val, ascending=False).head(5)
-                for idx, row in top_prods.iterrows():
-                    st.markdown(f"🔹 **{row[prod_cat]}** : <span style='color: #00f5d4;'>${row[prod_val]:,.2f}</span>", unsafe_allow_html=True)
-            else:
-                st.warning("أعمدة المنتجات غير متوفرة.")
-
-        with row2_col2:
-            st.subheader("🌐 التوزيع الإقليمي والنسب (Regional Sales)")
-            if text_cols and numeric_cols:
-                reg_cat = st.selectbox("اختر فئة المناطق / الفروع:", text_cols, key='reg_cat')
-                reg_val = st.selectbox("اختر قيمة المبيعات الإقليمية:", numeric_cols, key='reg_val')
-                
-                pie_df = df.groupby(reg_cat)[reg_val].sum().reset_index().head(6)
-                fig_donut = px.pie(
-                    pie_df, names=reg_cat, values=reg_val, hole=0.5,
-                    template="plotly_dark"
-                )
-                fig_donut.update_layout(plot_bgcolor='rgba(0,0,0,0)', paper_bgcolor='rgba(0,0,0,0)')
-                st.plotly_chart(fig_donut, use_container_width=True)
-
-        # جدول البيانات التفصيلي في الأسفل
-        st.markdown("---")
-        st.subheader("📋 تفاصيل السجلات والبيانات الخام")
-        st.dataframe(df, use_container_width=True)
+        # التبويب الرابع: البيانات الخام
+        with tab4:
+            st.markdown("#### 📋 استعراض قاعدة البيانات الحالية")
+            st.dataframe(df_filtered, use_container_width=True)
+            
+            # زر لتحميل البيانات المفلترة
+            csv = df_filtered.to_csv(index=False).encode('utf-8')
+            st.download_button(label="💾 تحميل البيانات الحالية كـ CSV", data=csv, file_name="filtered_data.csv", mime="text/csv")
 
     except Exception as e:
-        st.error(f"حدث خطأ أثناء معالجة ملف البيانات: {e}")
+        st.error(f"حدث خطأ غير متوقع أثناء معالجة البيانات: {e}")
+
 else:
-    # شاشة ترحيبية تشبه واجهة الصورة تماماً في حال عدم رفع ملف
-    st.markdown("""
-        <div class="upload-section">
-            <h3>📂 مرحباً بك في لوحة تحكم المبيعات</h3>
-            <p>يرجى استخدام القائمة الجانبية لرفع ملف الاكسل الخاص بك (Excel أو CSV) لتوليد كافة الرسوم البيانية والمؤشرات تلقائياً.</p>
-        </div>
-    """, unsafe_allow_html=True)
+    # الشاشة الترحيبية
+    st.info("👈 يرجى رفع ملفك من القائمة الجانبية. الداشبورد سيتكيف تلقائياً مع بياناتك ويعرض كافة التحليلات التفاعلية.")
