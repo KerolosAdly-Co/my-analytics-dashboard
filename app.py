@@ -6,21 +6,24 @@ from streamlit_extras.metric_cards import style_metric_cards
 import plotly.graph_objects as go
 import altair as alt
 
+# إعداد الصفحة
 st.set_page_config(page_title="Superstore Sales Analytics", page_icon="📈", layout="wide", initial_sidebar_state='collapsed')
 
-# تعديل المسافة العلوية هنا
+# تعديل الـ CSS لدعم الوضع الداكن وإنزال العنوان قليلاً
 st.markdown("""
         <style>
                .block-container {
                     padding-top: 4rem; 
                     padding-bottom: 1rem;
                 }
+                /* إزالة الخلفية البيضاء من بطاقات المؤشرات لتتوافق مع الوضع الداكن */
                 div[data-testid="metric-container"] {
                     background-color: transparent;
                 }
         </style>
         """, unsafe_allow_html=True) 
 
+# دالة حساب نسبة التغير السنوية
 def get_per_year_change(col, df, metric):
     grp_years = df.groupby('year')[col].agg([metric])[metric]
     grp_years = grp_years.pct_change() * 100
@@ -28,6 +31,7 @@ def get_per_year_change(col, df, metric):
     grp_years = grp_years.apply(lambda x: f"{x:.1f}%" if pd.notnull(x) else 'NaN')
     return grp_years
 
+# تحميل البيانات وتخزينها مؤقتاً
 @st.cache_data(ttl=3600)
 def load_data():
     try:
@@ -36,6 +40,7 @@ def load_data():
             sheet_name=0,
             parse_dates=['Order Date', 'Ship Date']
         )
+        # تنظيف أسماء الأعمدة من أي مسافات زائدة
         df.columns = df.columns.str.strip()
     except Exception as e:
         st.error(f"حدث خطأ أثناء قراءة ملف الإكسل: {e}")
@@ -45,6 +50,7 @@ def load_data():
     df['Ship Date'] = pd.to_datetime(df['Ship Date'], errors='coerce')
     df = df.dropna(subset=['Order Date', 'Ship Date'])
 
+    # استخراج السنة والشهر
     df['year'] = df['Order Date'].dt.year
     df['month'] = df['Order Date'].dt.to_period('M').astype(str)
     df['days to ship'] = abs((df['Ship Date'] - df['Order Date']).dt.days)
@@ -55,6 +61,7 @@ def load_data():
 
     return df, grp_years_sales, grp_year_profit, grp_year_orders
 
+# تجهيز الحاويات
 sidebar = st.sidebar
 dash_1 = st.container()
 dash_2 = st.container()
@@ -63,8 +70,10 @@ dash_4 = st.container()
 dash_5 = st.container()
 dash_6 = st.container()
 
+# تحميل البيانات
 df_original, grp_years_sales, grp_year_profit, grp_year_orders = load_data()
 
+# الشريط الجانبي للفلترة
 with sidebar:
     year_list = grp_years_sales.index.to_list()
     year_list.insert(0, "All")
@@ -75,10 +84,12 @@ with sidebar:
     else:
         df = df_original[df_original['year'] == int(selected_year)]
 
+# القسم 1: العنوان
 with dash_1:
     st.markdown("<h2 style='text-align: center;'>Superstore Sales Dashboard</h2>", unsafe_allow_html=True)
     st.write("")
 
+# القسم 2: المؤشرات الرئيسية (KPIs)
 with dash_2:
     total_sales = df['Sales'].sum()
     total_profit = df['Profit'].sum()
@@ -100,6 +111,7 @@ with dash_2:
     
     style_metric_cards(border_left_color="#DBF227")
 
+# القسم 3: اتجاهات المبيعات والأرباح الشهرية
 with dash_3:
     st.markdown("### 📈 Sales & Profit Trends Over Time")
     monthly_data = df.groupby('month')[['Sales', 'Profit']].sum().reset_index()
@@ -116,6 +128,7 @@ with dash_3:
     
     st.altair_chart(trend_chart, use_container_width=True, theme="streamlit")
 
+# القسم 4: أعلى 10 منتجات مبيعاً وربحاً
 with dash_4:
     col1, col2 = st.columns(2)
     top_product_sales = df.groupby('Product Name')['Sales'].sum().nlargest(10).reset_index()
@@ -137,6 +150,7 @@ with dash_4:
         chart = chart.properties(title="Top 10 Most Profitable Products")
         st.altair_chart(chart, use_container_width=True, theme="streamlit")
 
+# القسم 5: تحليل العملاء والمناطق والشحن (مع البحث الذكي عن العمود الجغرافي)
 with dash_5:
     col1, col2, col3 = st.columns(3)
     
@@ -153,16 +167,24 @@ with dash_5:
             st.warning("⚠️ عمود 'Segment' غير موجود في ملف الإكسل.")
 
     with col2:
-        if 'State' in df.columns:
-            state_data = df.groupby('State')['Sales'].sum().nlargest(10).reset_index()
+        # البحث التلقائي عن العمود الجغرافي المناسب (State أو Region أو Province أو City)
+        geo_col = None
+        for col in ['State', 'state', 'Region', 'Province', 'City']:
+            if col in df.columns:
+                geo_col = col
+                break
+        
+        if geo_col:
+            state_data = df.groupby(geo_col)['Sales'].sum().nlargest(10).reset_index()
             bar_state = alt.Chart(state_data).mark_bar(color="#042940").encode(
                 x=alt.X('Sales:Q', axis=alt.Axis(format='~s')),
-                y=alt.Y('State:N', sort='-x'),
-                tooltip=['State', alt.Tooltip('Sales:Q', format='$,.2f')]
-            ).properties(title="Top 10 States by Sales", height=300)
+                y=alt.Y(f'{geo_col}:N', sort='-x'),
+                tooltip=[geo_col, alt.Tooltip('Sales:Q', format='$,.2f')]
+            ).properties(title=f"Top 10 {geo_col} by Sales", height=300)
             st.altair_chart(bar_state, use_container_width=True, theme="streamlit")
         else:
-            st.warning("⚠️ عمود 'State' غير موجود في ملف الإكسل. تأكد من كتابته بالإنجليزية وبحروف كبيرة.")
+            # إذا لم يجد أي عمود، يطبع أسماء الأعمدة المتاحة لتسهيل التصحيح
+            st.warning(f"⚠️ لم يتم العثور على عمود 'State' أو 'Region'. الأعمدة المتاحة في ملفك هي: {', '.join(df.columns)}")
 
     with col3:
         if 'Ship Mode' in df.columns:
@@ -176,6 +198,7 @@ with dash_5:
         else:
             st.warning("⚠️ عمود 'Ship Mode' غير موجود في ملف الإكسل.")
 
+# القسم 6: متوسط أيام الشحن واتجاهات الفئات
 with dash_6:
     col1, col2 = st.columns([1, 2])
 
