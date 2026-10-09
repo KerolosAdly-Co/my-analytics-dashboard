@@ -85,7 +85,8 @@ if uploaded_file is not None:
                     bar_y = st.selectbox("المحور الرأسي (القيم):", num_cols, key='bar_y')
                     # تجميع لأعلى 15 نتيجة
                     bar_data = df_filtered.groupby(bar_x)[bar_y].sum().reset_index().sort_values(by=bar_y, ascending=False).head(15)
-                    fig_bar = px.bar(bar_data, x=bar_x, y=bar_y, color=bar_y, template="plotly_dark", title=f"إجمالي {bar_y} حسب {bar_x}", color_continuousscale="Blues")
+                    # تم تصحيح color_continuous_scale هنا
+                    fig_bar = px.bar(bar_data, x=bar_x, y=bar_y, color=bar_y, template="plotly_dark", title=f"إجمالي {bar_y} حسب {bar_x}", color_continuous_scale="Blues")
                     st.plotly_chart(fig_bar, use_container_width=True)
                 else:
                     st.info("نحتاج لأعمدة رقمية ونصية معاً لرسم هذا المخطط.")
