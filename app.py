@@ -71,7 +71,8 @@ if uploaded_file is not None:
         sales_col = numeric_cols[2] if len(numeric_cols) > 2 else rev_col
 
         total_revenue = df[rev_col].sum() if rev_col else 0
-        total_profit = df[profit_col].sum() * 0.3 if profit_col else 0   افتراض هامش ربح تقديري إذا لم يوجد عمود ربح صريح
+        # افتراض هامش ربح تقديري إذا لم يوجد عمود ربح صريح
+        total_profit = df[profit_col].sum() * 0.3 if profit_col else 0   
         total_sales_val = df[sales_col].sum() if sales_col else total_rows
 
         kpi1.metric("إجمالي الإيرادات (Total Revenue)", f"${total_revenue:,.0f}", delta="7.37% 🟢")
@@ -154,7 +155,7 @@ if uploaded_file is not None:
         st.dataframe(df, use_container_width=True)
 
     except Exception as e:
-        st.error(fحدث خطأ أثناء معالجة ملف البيانات: {e})
+        st.error(f"حدث خطأ أثناء معالجة ملف البيانات: {e}")
 else:
     # شاشة ترحيبية تشبه واجهة الصورة تماماً في حال عدم رفع ملف
     st.markdown("""
