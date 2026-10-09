@@ -1,300 +1,217 @@
 import streamlit as st
-import numpy as np
 import pandas as pd
-from millify import millify
-from streamlit_extras.metric_cards import style_metric_cards
-import plotly.graph_objects as go
+import numpy as np
 import plotly.express as px
-import altair as alt
+import plotly.graph_objects as go
 
-# إعداد الصفحة
-st.set_page_config(page_title="Superstore Sales Analytics", page_icon="📈", layout="wide", initial_sidebar_state='collapsed')
+# 1. إعدادات الصفحة
+st.set_page_config(page_title="لوحة تحكم مبيعات محل ملابس", layout="wide", page_icon="🛍️")
 
-# تعديل الـ CSS لدعم الوضع الداكن وإنزال العنوان قليلاً
-st.markdown("""
-        <style>
-               .block-container {
-                    padding-top: 4rem; 
-                    padding-bottom: 1rem;
-                }
-                div[data-testid="metric-container"] {
-                    background-color: transparent;
-                }
-        </style>
-        """, unsafe_allow_html=True) 
-
-# دالة حساب نسبة التغير السنوية
-def get_per_year_change(col, df, metric):
-    grp_years = df.groupby('year')[col].agg([metric])[metric]
-    grp_years = grp_years.pct_change() * 100
-    grp_years.fillna(0, inplace=True)
-    grp_years = grp_years.apply(lambda x: f"{x:.1f}%" if pd.notnull(x) else 'NaN')
-    return grp_years
-
-# تحميل البيانات وتخزينها مؤقتاً
-@st.cache_data(ttl=50)
+# 2. دالة قراءة البيانات
+@st.cache_data
 def load_data():
     try:
-        df = pd.read_excel(
-            'Sample - Superstore.xls', 
-            sheet_name=0,
-            parse_dates=['Order Date', 'Ship Date']
-        )
+        df = pd.read_excel("Sales Shop.xlsx")
         df.columns = df.columns.str.strip()
+        
+        # تنسيق البيانات
+        df['التاريخ'] = pd.to_datetime(df['التاريخ'])
+        cols_to_numeric = ['المبيعات', 'الأرباح', 'الطلبات']
+        for col in cols_to_numeric:
+            if col in df.columns:
+                df[col] = pd.to_numeric(df[col], errors='coerce')
+        
+        # أعمدة مساعدة للتحليل الزمني
+        df['الشهر'] = df['التاريخ'].dt.strftime('%Y-%m')
+        df['السنة'] = df['التاريخ'].dt.year
+        df['نسبة الربح'] = np.where(df['المبيعات'] > 0, (df['الأرباح'] / df['المبيعات']) * 100, 0)
+        
+        # التأكد من وجود عمود الفرع
+        if 'الفرع' not in df.columns:
+            st.warning("⚠️ تنبيه: عمود 'الفرع' غير موجود في ملف الإكسيل. يرجى إضافته لتفعيل تحليلات الفروع.")
+            df['الفرع'] = 'غير محدد'
+            
+        return df
+    except FileNotFoundError:
+        st.error("⚠️ خطأ: لم يتم العثور على ملف 'Sales Shop.xlsx'.")
+        st.stop()
     except Exception as e:
-        st.error(f"حدث خطأ أثناء قراءة ملف الإكسل: {e}")
+        st.error(f"⚠️ حدث خطأ أثناء قراءة الملف: {e}")
         st.stop()
 
-    df['Order Date'] = pd.to_datetime(df['Order Date'], errors='coerce')
-    df['Ship Date'] = pd.to_datetime(df['Ship Date'], errors='coerce')
-    df = df.dropna(subset=['Order Date', 'Ship Date'])
+df = load_data()
 
-    df['year'] = df['Order Date'].dt.year
-    df['month'] = df['Order Date'].dt.to_period('M').astype(str)
-    df['days to ship'] = abs((df['Ship Date'] - df['Order Date']).dt.days)
+# 3. الشريط الجانبي (الفلاتر)
+st.sidebar.header("🔍 خيارات التصفية")
+min_date = df['التاريخ'].min().date()
+max_date = df['التاريخ'].max().date()
+date_range = st.sidebar.date_input("اختر الفترة الزمنية", [min_date, max_date])
 
-    grp_years_sales = get_per_year_change('Sales', df, 'sum')
-    grp_year_profit = get_per_year_change('Profit', df, 'sum')
-    grp_year_orders = get_per_year_change('Order ID', df, 'count')
+branches = df['الفرع'].dropna().unique() if 'الفرع' in df.columns else []
+selected_branch = st.sidebar.multiselect("اختر الفرع", options=branches, default=branches)
 
-    return df, grp_years_sales, grp_year_profit, grp_year_orders
+categories = df['الفئة'].dropna().unique() if 'الفئة' in df.columns else []
+selected_category = st.sidebar.multiselect("اختر الفئة", options=categories, default=categories)
 
-# تجهيز الحاويات
-sidebar = st.sidebar
-dash_1 = st.container()
-dash_2 = st.container()
-dash_3 = st.container()
-dash_4 = st.container()
-dash_5 = st.container()
-dash_6 = st.container()
-dash_7 = st.container()
+# تطبيق الفلاتر
+mask = (df['التاريخ'].dt.date >= date_range[0]) & (df['التاريخ'].dt.date <= date_range[1])
+if selected_branch: mask = mask & (df['الفرع'].isin(selected_branch))
+if selected_category: mask = mask & (df['الفئة'].isin(selected_category))
+filtered_df = df[mask]
 
-# تحميل البيانات
-df_original, grp_years_sales, grp_year_profit, grp_year_orders = load_data()
+# 4. عنوان اللوحة
+st.title("🛍️ لوحة تحكم مبيعات محل الملابس")
 
-# الشريط الجانبي للفلترة
-with sidebar:
-    year_list = grp_years_sales.index.to_list()
-    year_list.insert(0, "All")
-    selected_year = st.selectbox("Select a year", year_list)
+if filtered_df.empty:
+    st.warning("لا توجد بيانات متاحة للفلاتر المحددة.")
+    st.stop()
 
-    if selected_year == "All":
-        df = df_original
-    else:
-        df = df_original[df_original['year'] == int(selected_year)]
+# 5. المؤشرات الرئيسية (KPIs)
+total_sales = filtered_df['المبيعات'].sum()
+total_profit = filtered_df['الأرباح'].sum()
+total_orders = filtered_df['الطلبات'].sum()
+aov = total_sales / total_orders if total_orders > 0 else 0
 
-# القسم 1: العنوان
-with dash_1:
-    st.markdown("<h2 style='text-align: center;'>Superstore Sales Dashboard</h2>", unsafe_allow_html=True)
-    st.write("")
+col1, col2, col3, col4 = st.columns(4)
+col1.metric("إجمالي المبيعات", f"${total_sales:,.0f}")
+col2.metric("إجمالي الأرباح", f"${total_profit:,.0f}")
+col3.metric("عدد الطلبات", f"{total_orders:,.0f}")
+col4.metric("متوسط قيمة الطلب (AOV)", f"${aov:,.2f}")
 
-# القسم 2: المؤشرات الرئيسية (KPIs)
-with dash_2:
-    total_sales = df['Sales'].sum()
-    total_profit = df['Profit'].sum()
-    total_orders = df['Order ID'].nunique()
+st.markdown("---")
 
-    if selected_year == "All":
-        sales_per_change = grp_years_sales.iloc[-1] if not grp_years_sales.empty else "0%"
-        profit_per_change = grp_year_profit.iloc[-1] if not grp_year_profit.empty else "0%"
-        order_count_per_change = grp_year_orders.iloc[-1] if not grp_year_orders.empty else "0%"
-    else:
-        sales_per_change = grp_years_sales.get(selected_year, "0%")
-        profit_per_change = grp_year_profit.get(selected_year, "0%")
-        order_count_per_change = grp_year_orders.get(selected_year, "0%")
+# 6. تقسيم اللوحة إلى تبويبات (Tabs)
+tab1, tab2, tab3 = st.tabs(["📊 نظرة عامة والأرباح السنوية", "🏢 تحليل الفروع والأرباح الشهرية", "📦 تحليل المنتجات"])
 
-    col1, col2, col3 = st.columns(3)
-    col1.metric(label="Sales", value="$" + millify(total_sales, precision=2), delta=sales_per_change)
-    col2.metric(label="Profit", value="$" + millify(total_profit, precision=2), delta=profit_per_change)
-    col3.metric(label="Orders", value=total_orders, delta=order_count_per_change)
+# ==========================================
+# التبويب الأول: نظرة عامة (Overview & Yearly Profit)
+# ==========================================
+with tab1:
+    st.subheader("📈 تطور المبيعات والأرباح")
+    trend_data = filtered_df.groupby('التاريخ')[['المبيعات', 'الأرباح']].sum().reset_index()
+    fig_trend = px.line(trend_data, x='التاريخ', y=['المبيعات', 'الأرباح'], 
+                        color_discrete_map={'المبيعات': '#2ecc71', 'الأرباح': '#3498db'})
+    st.plotly_chart(fig_trend, use_container_width=True)
+
+    col_t1, col_t2 = st.columns(2)
+    with col_t1:
+        fig_pie = px.pie(filtered_df, names='الفئة', values='المبيعات', hole=0.4, title="المبيعات حسب الفئة")
+        st.plotly_chart(fig_pie, use_container_width=True)
+    with col_t2:
+        fig_tree = px.treemap(filtered_df, path=['الفئة', 'المنتج'], values='المبيعات', 
+                              title="التسلسل الهرمي للمبيعات (فئة -> منتج)")
+        st.plotly_chart(fig_tree, use_container_width=True)
+
+    st.markdown("---")
+    st.subheader("📅 تحليل الأرباح السنوية (أكثر سنة ربحاً)")
     
-    style_metric_cards(border_left_color="#DBF227")
-
-# القسم 3: اتجاهات المبيعات والأرباح الشهرية
-with dash_3:
-    st.markdown("### 📈 Sales & Profit Trends Over Time")
-    monthly_data = df.groupby('month')[['Sales', 'Profit']].sum().reset_index()
-    monthly_data = monthly_data.sort_values('month')
-    
-    monthly_melted = monthly_data.melt('month', var_name='Metric', value_name='Amount')
-
-    trend_chart = alt.Chart(monthly_melted).mark_line(point=True, strokeWidth=2.5).encode(
-        x=alt.X('month:N', title='Month', axis=alt.Axis(labelAngle=-45)),
-        y=alt.Y('Amount:Q', title='Amount ($)'),
-        color=alt.Color('Metric:N', scale=alt.Scale(domain=['Sales', 'Profit'], range=['#9FC131', '#005C53'])),
-        tooltip=['month', 'Metric', alt.Tooltip('Amount:Q', format='$,.2f')]
-    ).properties(height=350, title="Monthly Sales & Profit Trends")
-    
-    st.altair_chart(trend_chart, use_container_width=True, theme="streamlit")
-
-# القسم 4: أعلى 10 منتجات مبيعاً وربحاً
-with dash_4:
-    col1, col2 = st.columns(2)
-    top_product_sales = df.groupby('Product Name')['Sales'].sum().nlargest(10).reset_index()
-    top_product_profit = df.groupby('Product Name')['Profit'].sum().nlargest(10).reset_index()
-    
-    with col1:
-        chart = alt.Chart(top_product_sales).mark_bar(opacity=0.9, color="#9FC131").encode(
-            x='sum(Sales):Q',
-            y=alt.Y('Product Name:N', sort='-x')   
-        )
-        chart = chart.properties(title="Top 10 Selling Products")
-        st.altair_chart(chart, use_container_width=True, theme="streamlit")
+    yearly_profit = filtered_df.groupby('السنة')['الأرباح'].sum().reset_index()
+    if not yearly_profit.empty:
+        # إيجاد أكثر سنة ربحاً
+        best_year_idx = yearly_profit['الأرباح'].idxmax()
+        best_year = yearly_profit.loc[best_year_idx]
         
-    with col2:
-        chart = alt.Chart(top_product_profit).mark_bar(opacity=0.9, color="#9FC131").encode(
-            x='sum(Profit):Q',
-            y=alt.Y('Product Name:N', sort='-x')
-        )
-        chart = chart.properties(title="Top 10 Most Profitable Products")
-        st.altair_chart(chart, use_container_width=True, theme="streamlit")
+        col_y1, col_y2 = st.columns([1, 2])
+        with col_y1:
+            st.metric(label="🏆 أكثر سنة كان فيها ربح", 
+                      value=f"سنة {int(best_year['السنة'])}", 
+                      delta=f"${best_year['الأرباح']:,.2f}")
+        with col_y2:
+            fig_year = px.bar(yearly_profit, x='السنة', y='الأرباح', 
+                              title="إجمالي الأرباح لكل سنة",
+                              text_auto='.2s', color='الأرباح', color_continuous_scale='Greens')
+            st.plotly_chart(fig_year, use_container_width=True)
 
-# القسم 5: تحليل العملاء والمناطق والشحن
-with dash_5:
-    col1, col2, col3 = st.columns(3)
+# ==========================================
+# التبويب الثاني: تحليل الفروع (Branch Analysis & Monthly Profit)
+# ==========================================
+with tab2:
+    st.subheader("🏢 أداء الفروع (أي فرع يبيع أكثر؟)")
     
-    with col1:
-        if 'Segment' in df.columns:
-            segment_data = df.groupby('Segment')['Sales'].sum().reset_index()
-            donut = alt.Chart(segment_data).mark_arc(innerRadius=50).encode(
-                theta=alt.Theta(field="Sales", type="quantitative"),
-                color=alt.Color(field="Segment", type="nominal", scale=alt.Scale(scheme='tableau10')),
-                tooltip=['Segment', alt.Tooltip('Sales:Q', format='$,.2f')]
-            ).properties(title="Sales by Customer Segment", height=300)
-            st.altair_chart(donut, use_container_width=True, theme="streamlit")
-        else:
-            st.warning("⚠️ عمود 'Segment' غير موجود في ملف الإكسل.")
+    branch_region_sales = filtered_df.groupby(['الفرع', 'المنطقة'])['المبيعات'].sum().reset_index()
+    fig_branch_bar = px.bar(branch_region_sales, x='الفرع', y='المبيعات', color='المنطقة',
+                            title="مبيعات الفروع موزعة حسب المنطقة", text_auto='.2s',
+                            color_discrete_sequence=px.colors.qualitative.Pastel)
+    fig_branch_bar.update_layout(xaxis={'categoryorder':'total descending'})
+    st.plotly_chart(fig_branch_bar, use_container_width=True)
 
-    with col2:
-        geo_col = None
-        for col in ['State', 'state', 'Region', 'Province', 'City']:
-            if col in df.columns:
-                geo_col = col
-                break
+    st.markdown("---")
+    st.subheader("💰 صافي الربح الشهري لكل فرع")
+    st.markdown("يوضح الرسم البياني التالي كم يكسبك كل فرع على حدة في كل شهر.")
+    
+    # إنشاء جدول محوري (Pivot Table) للأرباح الشهرية لكل فرع
+    monthly_branch_profit = filtered_df.pivot_table(index='الشهر', columns='الفرع', values='الأرباح', aggfunc='sum').fillna(0)
+    
+    if not monthly_branch_profit.empty:
+        # رسم بياني خطي لتطور أرباح الفروع شهرياً
+        fig_monthly_profit = px.line(monthly_branch_profit, x=monthly_branch_profit.index, y=monthly_branch_profit.columns,
+                                     title="تطور الأرباح الشهرية لكل فرع",
+                                     labels={'value': 'الأرباح ($)', 'variable': 'الفرع', 'الشهر': 'الشهر'})
+        st.plotly_chart(fig_monthly_profit, use_container_width=True)
         
-        if geo_col:
-            state_data = df.groupby(geo_col)['Sales'].sum().nlargest(10).reset_index()
-            bar_state = alt.Chart(state_data).mark_bar(color="#042940").encode(
-                x=alt.X('Sales:Q', axis=alt.Axis(format='~s')),
-                y=alt.Y(f'{geo_col}:N', sort='-x'),
-                tooltip=[geo_col, alt.Tooltip('Sales:Q', format='$,.2f')]
-            ).properties(title=f"Top 10 {geo_col} by Sales", height=300)
-            st.altair_chart(bar_state, use_container_width=True, theme="streamlit")
-        else:
-            st.warning(f"⚠️ لم يتم العثور على عمود 'State' أو 'Region'. الأعمدة المتاحة: {', '.join(df.columns)}")
+        # عرض الجدول التفصيلي
+        with st.expander("📄 عرض جدول الأرباح الشهرية لكل فرع"):
+            st.dataframe(monthly_branch_profit.style.format("{:,.2f}"), use_container_width=True)
 
-    with col3:
-        if 'Ship Mode' in df.columns:
-            ship_data = df.groupby('Ship Mode')['Sales'].sum().reset_index()
-            bar_ship = alt.Chart(ship_data).mark_bar(color="#9FC131").encode(
-                x=alt.X('Sales:Q', axis=alt.Axis(format='~s')),
-                y=alt.Y('Ship Mode:N', sort='-x'),
-                tooltip=['Ship Mode', alt.Tooltip('Sales:Q', format='$,.2f')]
-            ).properties(title="Sales by Ship Mode", height=300)
-            st.altair_chart(bar_ship, use_container_width=True, theme="streamlit")
-        else:
-            st.warning("⚠️ عمود 'Ship Mode' غير موجود في ملف الإكسل.")
+    st.markdown("---")
+    st.subheader("🔍 تحليل منتجات فرع معين")
+    selected_branch_drill = st.selectbox("اختر فرعاً لعرض المنتجات التي باعها:", options=filtered_df['الفرع'].unique())
+    
+    if selected_branch_drill:
+        branch_products = filtered_df[filtered_df['الفرع'] == selected_branch_drill].groupby('المنتج')['المبيعات'].sum().nlargest(10).reset_index()
+        fig_branch_products = px.bar(branch_products, x='المبيعات', y='المنتج', orientation='h',
+                                     title=f"أفضل 10 منتجات مبيعاً في فرع: {selected_branch_drill}",
+                                     color='المبيعات', color_continuous_scale='Teal')
+        fig_branch_products.update_layout(yaxis={'categoryorder':'total ascending'})
+        st.plotly_chart(fig_branch_products, use_container_width=True)
 
-# القسم 6: متوسط أيام الشحن واتجاهات الفئات
-with dash_6:
-    col1, col2 = st.columns([1, 2])
+# ==========================================
+# التبويب الثالث: تحليل المنتجات (Product Analysis)
+# ==========================================
+with tab3:
+    st.subheader("📦 الإجمالي لصنف معين في الفروع كلها")
+    
+    selected_product = st.selectbox("اختر منتجاً لمعرفة إجمالي مبيعاته في كل فرع:", options=filtered_df['المنتج'].unique())
+    
+    if selected_product:
+        product_df = filtered_df[filtered_df['المنتج'] == selected_product]
+        product_branch_sales = product_df.groupby('الفرع')['المبيعات'].sum().reset_index()
+        
+        col_pr1, col_pr2 = st.columns([1, 2])
+        with col_pr1:
+            st.metric("إجمالي مبيعات الصنف في كل الفروع", f"${product_branch_sales['المبيعات'].sum():,.2f}")
+            st.metric("عدد القطع المباعة", f"{product_df['الطلبات'].sum():,.0f}")
+        with col_pr2:
+            fig_product_branch = px.bar(product_branch_sales, x='الفرع', y='المبيعات', 
+                                         title=f"مبيعات '{selected_product}' في كل فرع",
+                                         color='المبيعات', color_continuous_scale='Bluyl', text_auto='.2s')
+            st.plotly_chart(fig_product_branch, use_container_width=True)
 
-    with col1:
-        value = int(np.round(df['days to ship'].mean())) if not df.empty else 0
-        fig = go.Figure(go.Indicator(
-            mode="gauge+number",
-            value=value,
-            title={'text': "Average Shipping Days"},
-            gauge={'axis': {'range': [df['days to ship'].min() if not df.empty else 0, df['days to ship'].max() if not df.empty else 10]},
-                   'bar': {'color': "#005C53"}}
-        ))
-        fig.update_layout(height=350) 
-        st.plotly_chart(fig, use_container_width=True, theme="streamlit")
+    st.markdown("---")
+    st.subheader("🏆 أداء المنتجات العام")
+    col_p1, col_p2, col_p3 = st.columns(3)
+    
+    with col_p1:
+        top_sales = filtered_df.groupby('المنتج')['المبيعات'].sum().nlargest(5).reset_index()
+        fig_top_sales = px.bar(top_sales, x='المبيعات', y='المنتج', orientation='h', 
+                               title="أفضل 5 منتجات مبيعاً", color='المبيعات', color_continuous_scale='Blues')
+        fig_top_sales.update_layout(yaxis={'categoryorder':'total ascending'}, showlegend=False)
+        st.plotly_chart(fig_top_sales, use_container_width=True)
 
-    with col2:
-        custom_colors = {'Furniture': '#005C53', 'Office Supplies': '#9FC131', 'Technology': '#042940'}
-        bars = alt.Chart(df).mark_bar().encode(
-            y=alt.Y('sum(Sales):Q', stack='zero', axis=alt.Axis(format='~s')),
-            x=alt.X('year:N'),
-            color=alt.Color('Category:N', scale=alt.Scale(domain=list(custom_colors.keys()), range=list(custom_colors.values())))
-        )
-        text = alt.Chart(df).mark_text(dx=-15, dy=30, color='white').encode(
-            y=alt.Y('sum(Sales):Q', stack='zero', axis=alt.Axis(format='~s')),
-            x=alt.X('year:N'),
-            detail='Category:N',
-            text=alt.Text('sum(Sales):Q', format='~s')
-        )
-        chart = (bars + text).properties(title="Sales trends for Product Categories over the years")
-        st.altair_chart(chart, use_container_width=True, theme="streamlit")
+    with col_p2:
+        top_profit = filtered_df.groupby('المنتج')['الأرباح'].sum().nlargest(5).reset_index()
+        fig_top_profit = px.bar(top_profit, x='الأرباح', y='المنتج', orientation='h', 
+                                title="أفضل 5 منتجات ربحية", color='الأرباح', color_continuous_scale='Greens')
+        fig_top_profit.update_layout(yaxis={'categoryorder':'total ascending'}, showlegend=False)
+        st.plotly_chart(fig_top_profit, use_container_width=True)
 
-# القسم 7: الخريطة التفاعلية (Map 🗺️ Sales By Region)
-with dash_7:
-    st.markdown("### 🗺️ Sales By Region (Map)")
+    with col_p3:
+        profit_margin = filtered_df.groupby('المنتج')['نسبة الربح'].mean().nlargest(5).reset_index()
+        fig_margin = px.bar(profit_margin, x='نسبة الربح', y='المنتج', orientation='h',
+                            title="أعلى 5 منتجات في نسبة الربح (%)", color='نسبة الربح', color_continuous_scale='Purples')
+        fig_margin.update_layout(yaxis={'categoryorder':'total ascending'}, showlegend=False)
+        st.plotly_chart(fig_margin, use_container_width=True)
 
-    # نحدد العمود الجغرافي بالأولوية: State > State/Province > Region
-    geo_col_map = None
-    for col in ['State', 'State/Province', 'Region']:
-        if col in df.columns:
-            geo_col_map = col
-            break
-
-    if geo_col_map is None:
-        st.warning("⚠️ لم يتم العثور على عمود 'State' أو 'State/Province' أو 'Region' في ملف الإكسل.")
-    else:
-        # تجميع المبيعات حسب العمود الجغرافي
-        geo_sales_map = df.groupby(geo_col_map)['Sales'].sum().reset_index()
-
-        # لو العمود State أو State/Province → خريطة أمريكا بالولايات
-        if geo_col_map in ['State', 'State/Province']:
-            fig_map = px.choropleth(
-                geo_sales_map,
-                locations=geo_col_map,
-                locationmode="USA-states",
-                color='Sales',
-                scope="usa",
-                color_continuous_scale="Viridis",
-                title=f"Sales Distribution Across US States (by {geo_col_map})",
-                labels={'Sales': 'Total Sales ($)'}
-            )
-            fig_map.update_layout(
-                height=550,
-                margin={"r": 0, "t": 60, "l": 0, "b": 0},
-                coloraxis_colorbar=dict(title="Sales ($)")
-            )
-            st.plotly_chart(fig_map, use_container_width=True, theme="streamlit")
-
-            # خريطة إضافية حسب الـ Region (ملونة) جنب خريطة الولايات
-            if 'Region' in df.columns:
-                st.markdown("#### Sales by Region (Summary)")
-                region_sales = df.groupby('Region')['Sales'].sum().reset_index()
-                bar_region = alt.Chart(region_sales).mark_bar(color="#005C53").encode(
-                    x=alt.X('Sales:Q', axis=alt.Axis(format='~s')),
-                    y=alt.Y('Region:N', sort='-x'),
-                    tooltip=['Region', alt.Tooltip('Sales:Q', format='$,.2f')]
-                ).properties(height=300, title="Total Sales by Region")
-                st.altair_chart(bar_region, use_container_width=True, theme="streamlit")
-
-        # لو مفيش State خالص → نعتمد على Region (بدون خريطة جغرافية دقيقة)
-        else:
-            st.info("ℹ️ لم يتم العثور على عمود 'State'، سيتم عرض الخريطة بناءً على 'Region'.")
-            region_sales_map = df.groupby('Region')['Sales'].sum().reset_index()
-
-            # خريطة Treemap تعبّر عن توزيع المبيعات بين المناطق (بديل بصري للخريطة)
-            fig_map = px.treemap(
-                region_sales_map,
-                path=['Region'],
-                values='Sales',
-                color='Sales',
-                color_continuous_scale="Viridis",
-                title="Sales Distribution by Region"
-            )
-            fig_map.update_layout(height=550, margin={"r": 0, "t": 60, "l": 0, "b": 0})
-            st.plotly_chart(fig_map, use_container_width=True, theme="streamlit")
-
-            # وكمان Bar chart للمقارنة
-            bar_region = alt.Chart(region_sales_map).mark_bar(color="#9FC131").encode(
-                x=alt.X('Sales:Q', axis=alt.Axis(format='~s')),
-                y=alt.Y('Region:N', sort='-x'),
-                tooltip=['Region', alt.Tooltip('Sales:Q', format='$,.2f')]
-            ).properties(height=300, title="Total Sales by Region")
-            st.altair_chart(bar_region, use_container_width=True, theme="streamlit")
+# 10. جدول البيانات التفصيلي
+with st.expander("📄 عرض البيانات التفصيلية (Sales Shop.xlsx)"):
+    st.dataframe(filtered_df.sort_values(by='التاريخ', ascending=False), use_container_width=True)
