@@ -4,7 +4,7 @@ import pandas as pd
 from millify import millify
 from streamlit_extras.metric_cards import style_metric_cards
 import plotly.graph_objects as go
-import plotly.express as px  # تمت الإضافة لعرض الخريطة
+import plotly.express as px
 import altair as alt
 
 # إعداد الصفحة
@@ -17,7 +17,6 @@ st.markdown("""
                     padding-top: 4rem; 
                     padding-bottom: 1rem;
                 }
-                /* إزالة الخلفية البيضاء من بطاقات المؤشرات لتتوافق مع الوضع الداكن */
                 div[data-testid="metric-container"] {
                     background-color: transparent;
                 }
@@ -41,7 +40,6 @@ def load_data():
             sheet_name=0,
             parse_dates=['Order Date', 'Ship Date']
         )
-        # تنظيف أسماء الأعمدة من أي مسافات زائدة
         df.columns = df.columns.str.strip()
     except Exception as e:
         st.error(f"حدث خطأ أثناء قراءة ملف الإكسل: {e}")
@@ -51,7 +49,6 @@ def load_data():
     df['Ship Date'] = pd.to_datetime(df['Ship Date'], errors='coerce')
     df = df.dropna(subset=['Order Date', 'Ship Date'])
 
-    # استخراج السنة والشهر
     df['year'] = df['Order Date'].dt.year
     df['month'] = df['Order Date'].dt.to_period('M').astype(str)
     df['days to ship'] = abs((df['Ship Date'] - df['Order Date']).dt.days)
@@ -70,7 +67,7 @@ dash_3 = st.container()
 dash_4 = st.container()
 dash_5 = st.container()
 dash_6 = st.container()
-dash_7 = st.container() # تمت إضافة قسم جديد للخريطة
+dash_7 = st.container()
 
 # تحميل البيانات
 df_original, grp_years_sales, grp_year_profit, grp_year_orders = load_data()
@@ -152,7 +149,7 @@ with dash_4:
         chart = chart.properties(title="Top 10 Most Profitable Products")
         st.altair_chart(chart, use_container_width=True, theme="streamlit")
 
-# القسم 5: تحليل العملاء والمناطق والشحن (مع البحث الذكي عن العمود الجغرافي)
+# القسم 5: تحليل العملاء والمناطق والشحن
 with dash_5:
     col1, col2, col3 = st.columns(3)
     
@@ -169,7 +166,6 @@ with dash_5:
             st.warning("⚠️ عمود 'Segment' غير موجود في ملف الإكسل.")
 
     with col2:
-        # البحث التلقائي عن العمود الجغرافي المناسب (State أو Region أو Province أو City)
         geo_col = None
         for col in ['State', 'state', 'Region', 'Province', 'City']:
             if col in df.columns:
@@ -185,8 +181,7 @@ with dash_5:
             ).properties(title=f"Top 10 {geo_col} by Sales", height=300)
             st.altair_chart(bar_state, use_container_width=True, theme="streamlit")
         else:
-            # إذا لم يجد أي عمود، يطبع أسماء الأعمدة المتاحة لتسهيل التصحيح
-            st.warning(f"⚠️ لم يتم العثور على عمود 'State' أو 'Region'. الأعمدة المتاحة في ملفك هي: {', '.join(df.columns)}")
+            st.warning(f"⚠️ لم يتم العثور على عمود 'State' أو 'Region'. الأعمدة المتاحة: {', '.join(df.columns)}")
 
     with col3:
         if 'Ship Mode' in df.columns:
@@ -235,31 +230,71 @@ with dash_6:
 # القسم 7: الخريطة التفاعلية (Map 🗺️ Sales By Region)
 with dash_7:
     st.markdown("### 🗺️ Sales By Region (Map)")
-    
-    # التحقق من وجود عمود 'State' لرسم الخريطة
-    if 'State' in df.columns:
-        # تجميع المبيعات حسب الولاية
-        state_sales_map = df.groupby('State')['Sales'].sum().reset_index()
-        
-        # إنشاء الخريطة التفاعلية
-        fig_map = px.choropleth(
-            state_sales_map,
-            locations='State',
-            locationmode="USA-states", # لأن بيانات Superstore خاصة بالولايات المتحدة
-            color='Sales',
-            scope="usa",
-            color_continuous_scale="Viridis", # يمكنك تغيير التدرج اللوني (مثل "Blues", "Reds", "Plasma")
-            title="Sales Distribution Across US States",
-            labels={'Sales': 'Total Sales ($)'}
-        )
-        
-        # تحديث تنسيق الخريطة لتناسب الوضع الداكن
-        fig_map.update_layout(
-            height=500,
-            margin={"r":0,"t":50,"l":0,"b":0},
-            coloraxis_colorbar=dict(title="Sales ($)")
-        )
-        
-        st.plotly_chart(fig_map, use_container_width=True, theme="streamlit")
+
+    # نحدد العمود الجغرافي بالأولوية: State > State/Province > Region
+    geo_col_map = None
+    for col in ['State', 'State/Province', 'Region']:
+        if col in df.columns:
+            geo_col_map = col
+            break
+
+    if geo_col_map is None:
+        st.warning("⚠️ لم يتم العثور على عمود 'State' أو 'State/Province' أو 'Region' في ملف الإكسل.")
     else:
-        st.warning("⚠️ عمود 'State' غير موجود في ملف الإكسل، لا يمكن رسم الخريطة.")
+        # تجميع المبيعات حسب العمود الجغرافي
+        geo_sales_map = df.groupby(geo_col_map)['Sales'].sum().reset_index()
+
+        # لو العمود State أو State/Province → خريطة أمريكا بالولايات
+        if geo_col_map in ['State', 'State/Province']:
+            fig_map = px.choropleth(
+                geo_sales_map,
+                locations=geo_col_map,
+                locationmode="USA-states",
+                color='Sales',
+                scope="usa",
+                color_continuous_scale="Viridis",
+                title=f"Sales Distribution Across US States (by {geo_col_map})",
+                labels={'Sales': 'Total Sales ($)'}
+            )
+            fig_map.update_layout(
+                height=550,
+                margin={"r": 0, "t": 60, "l": 0, "b": 0},
+                coloraxis_colorbar=dict(title="Sales ($)")
+            )
+            st.plotly_chart(fig_map, use_container_width=True, theme="streamlit")
+
+            # خريطة إضافية حسب الـ Region (ملونة) جنب خريطة الولايات
+            if 'Region' in df.columns:
+                st.markdown("#### Sales by Region (Summary)")
+                region_sales = df.groupby('Region')['Sales'].sum().reset_index()
+                bar_region = alt.Chart(region_sales).mark_bar(color="#005C53").encode(
+                    x=alt.X('Sales:Q', axis=alt.Axis(format='~s')),
+                    y=alt.Y('Region:N', sort='-x'),
+                    tooltip=['Region', alt.Tooltip('Sales:Q', format='$,.2f')]
+                ).properties(height=300, title="Total Sales by Region")
+                st.altair_chart(bar_region, use_container_width=True, theme="streamlit")
+
+        # لو مفيش State خالص → نعتمد على Region (بدون خريطة جغرافية دقيقة)
+        else:
+            st.info("ℹ️ لم يتم العثور على عمود 'State'، سيتم عرض الخريطة بناءً على 'Region'.")
+            region_sales_map = df.groupby('Region')['Sales'].sum().reset_index()
+
+            # خريطة Treemap تعبّر عن توزيع المبيعات بين المناطق (بديل بصري للخريطة)
+            fig_map = px.treemap(
+                region_sales_map,
+                path=['Region'],
+                values='Sales',
+                color='Sales',
+                color_continuous_scale="Viridis",
+                title="Sales Distribution by Region"
+            )
+            fig_map.update_layout(height=550, margin={"r": 0, "t": 60, "l": 0, "b": 0})
+            st.plotly_chart(fig_map, use_container_width=True, theme="streamlit")
+
+            # وكمان Bar chart للمقارنة
+            bar_region = alt.Chart(region_sales_map).mark_bar(color="#9FC131").encode(
+                x=alt.X('Sales:Q', axis=alt.Axis(format='~s')),
+                y=alt.Y('Region:N', sort='-x'),
+                tooltip=['Region', alt.Tooltip('Sales:Q', format='$,.2f')]
+            ).properties(height=300, title="Total Sales by Region")
+            st.altair_chart(bar_region, use_container_width=True, theme="streamlit")
