@@ -1,9 +1,10 @@
-pandas==2.0.3
-openpyxl
-numpy==1.23.5
-plotly==5.15.0
-streamlit==1.25.0
+
+streamlit
+pandas
+numpy
+plotly
+altair
 millify
-streamlit_extras==0.3.0
-altair==5.0.1
+streamlit-extras
+openpyxl
 xlrd
