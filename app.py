@@ -8,35 +8,58 @@ import plotly.graph_objects as go
 st.set_page_config(page_title="لوحة تحكم مبيعات محل ملابس", layout="wide", page_icon="🛍️")
 
 # ==========================================
-# 2. دالة قراءة البيانات (تم تعديلها لتناسب ملفك)
+# 2. رفع الملف من واجهة المستخدم (بدلاً من GitHub)
+# ==========================================
+st.sidebar.header("📂 رفع ملف البيانات")
+uploaded_file = st.sidebar.file_uploader("قم برفع ملف الإكسيل (Sales Shop.xlsx)", type=["xlsx", "csv"])
+
+if uploaded_file is None:
+    st.info("👈 من فضلك قم برفع ملف الإكسيل من الشريط الجانبي للبدء في عرض التحليلات.")
+    st.stop()
+
+# ==========================================
+# 3. دالة قراءة البيانات الذكية
 # ==========================================
 @st.cache_data
-def load_data():
+def load_data(file):
     try:
-        # استخدام header=1 لتخطي الصف الأول (العنوان المدمج) واعتبار الصف الثاني هو الترويسة
-        df = pd.read_excel("Sales Shop.xlsx", header=1)
+        # قراءة الملف بدون ترويسة لمعرفة مكان أسماء الأعمدة تلقائياً
+        file.seek(0)
+        temp_df = pd.read_excel(file, header=None, nrows=10)
+        header_row = 0
         
-        # تنظيف أسماء الأعمدة من المسافات
+        # البحث التلقائي عن الصف الذي يحتوي على كلمة 'التاريخ'
+        for i in range(min(5, len(temp_df))):
+            row_values = temp_df.iloc[i].astype(str).str.strip().tolist()
+            if any(x in row_values for x in ['التاريخ', 'Date', 'تاريخ']):
+                header_row = i
+                break
+        
+        # قراءة الملف مرة أخرى بالترويسة الصحيحة
+        file.seek(0)
+        df = pd.read_excel(file, header=header_row)
         df.columns = df.columns.str.strip()
         
-        # تحويل التاريخ وحذف صف "الإجمالي" والصفوف الفارغة تلقائياً
+        # التأكد من وجود الأعمدة الأساسية
+        required_cols = ['التاريخ', 'المبيعات', 'الأرباح', 'الطلبات']
+        for col in required_cols:
+            if col not in df.columns:
+                st.error(f"⚠️ خطأ: العمود '{col}' غير موجود. الأعمدة المتاحة: {df.columns.tolist()}")
+                st.stop()
+
+        # تنظيف البيانات وحذف صف "الإجمالي" تلقائياً
         df['التاريخ'] = pd.to_datetime(df['التاريخ'], errors='coerce')
-        df = df.dropna(subset=['التاريخ']) 
+        df = df.dropna(subset=['التاريخ']) # حذف أي صف لا يحتوي على تاريخ صالح (مثل صف الإجمالي)
         
-        # التأكد من أن الأعمدة الرقمية أرقام (ولو مش موجودة نضعها 0)
-        cols_to_numeric = ['المبيعات', 'الأرباح', 'الطلبات']
-        for col in cols_to_numeric:
-            if col in df.columns:
-                df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0)
-            else:
-                df[col] = 0
-                st.warning(f"⚠️ تنبيه: العمود '{col}' غير موجود في الملف، تم تعيينه كـ 0.")
-        
-        # التأكد من الأعمدة النصية
+        # تحويل الأرقام
+        for col in ['المبيعات', 'الأرباح', 'الطلبات']:
+            df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0)
+            
+        # تعبئة الأعمدة النصية إذا كانت مفقودة
         for col in ['الفرع', 'المنطقة', 'المنتج', 'الفئة']:
             if col not in df.columns:
                 df[col] = 'غير محدد'
-        
+                
         # أعمدة مساعدة للتحليل
         df['الشهر'] = df['التاريخ'].dt.strftime('%Y-%m')
         df['السنة'] = df['التاريخ'].dt.year
@@ -44,27 +67,29 @@ def load_data():
         
         return df
         
-    except FileNotFoundError:
-        st.error("⚠️ خطأ: لم يتم العثور على ملف 'Sales Shop.xlsx'. يرجى التأكد من وجود الملف في نفس المجلد.")
-        st.stop()
     except Exception as e:
         st.error(f"⚠️ حدث خطأ أثناء قراءة الملف: {e}")
         st.stop()
 
-df = load_data()
+df = load_data(uploaded_file)
 
 # ==========================================
-# 3. الشريط الجانبي (الفلاتر)
+# 4. الشريط الجانبي (الفلاتر)
 # ==========================================
+st.sidebar.markdown("---")
 st.sidebar.header("🔍 خيارات التصفية")
+
+# فلترة التاريخ
 min_date = df['التاريخ'].min().date()
 max_date = df['التاريخ'].max().date()
 date_range = st.sidebar.date_input("اختر الفترة الزمنية", [min_date, max_date])
 
-branches = df['الفرع'].dropna().unique() if 'الفرع' in df.columns else []
+# فلترة الفروع
+branches = df['الفرع'].dropna().unique()
 selected_branch = st.sidebar.multiselect("اختر الفرع", options=branches, default=branches)
 
-categories = df['الفئة'].dropna().unique() if 'الفئة' in df.columns else []
+# فلترة الفئات
+categories = df['الفئة'].dropna().unique()
 selected_category = st.sidebar.multiselect("اختر الفئة", options=categories, default=categories)
 
 # تطبيق الفلاتر
@@ -74,12 +99,12 @@ if selected_category: mask = mask & (df['الفئة'].isin(selected_category))
 filtered_df = df[mask]
 
 # ==========================================
-# 4. عنوان اللوحة والمؤشرات الرئيسية (KPIs)
+# 5. عنوان اللوحة والمؤشرات الرئيسية (KPIs)
 # ==========================================
 st.title("🛍️ لوحة تحكم مبيعات محل الملابس")
 
 if filtered_df.empty:
-    st.warning("لا توجد بيانات متاحة للفلاتر المحددة.")
+    st.warning("لا توجد بيانات متاحة للفلاتر المحددة. يرجى تعديل الفلاتر.")
     st.stop()
 
 total_sales = filtered_df['المبيعات'].sum()
@@ -96,7 +121,7 @@ col4.metric("متوسط قيمة الطلب (AOV)", f"${aov:,.2f}")
 st.markdown("---")
 
 # ==========================================
-# 5. تقسيم اللوحة إلى تبويبات (Tabs)
+# 6. تقسيم اللوحة إلى تبويبات (Tabs)
 # ==========================================
 tab1, tab2, tab3 = st.tabs(["📊 نظرة عامة والأرباح السنوية", "🏢 تحليل الفروع والأرباح الشهرية", "📦 تحليل المنتجات"])
 
@@ -156,7 +181,6 @@ with tab2:
     st.subheader("💰 صافي الربح الشهري لكل فرع")
     st.markdown("يوضح الرسم البياني التالي كم يكسبك كل فرع على حدة في كل شهر.")
     
-    # إنشاء جدول محوري (Pivot Table) للأرباح الشهرية لكل فرع
     monthly_branch_profit = filtered_df.pivot_table(index='الشهر', columns='الفرع', values='الأرباح', aggfunc='sum').fillna(0)
     
     if not monthly_branch_profit.empty:
@@ -228,7 +252,7 @@ with tab3:
         st.plotly_chart(fig_margin, use_container_width=True)
 
 # ==========================================
-# 10. جدول البيانات التفصيلي
+# 7. جدول البيانات التفصيلي
 # ==========================================
-with st.expander("📄 عرض البيانات التفصيلية (Sales Shop.xlsx)"):
+with st.expander("📄 عرض البيانات التفصيلية للملف المرفوع"):
     st.dataframe(filtered_df.sort_values(by='التاريخ', ascending=False), use_container_width=True)
